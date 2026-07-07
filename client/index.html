@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MockMate — AI Mock Interview Platform</title>
+    <meta
+      name="description"
+      content="Practice technical interviews with timed MCQ and coding rounds, real code execution in isolated Docker sandboxes, and Elo-style adaptive difficulty."
+    />
+    <meta property="og:title" content="MockMate — AI Mock Interview Platform" />
+    <meta
+      property="og:description"
+      content="Timed mock interviews with adaptive difficulty, sandboxed code execution, and AI-powered hints and feedback."
+    />
+    <meta property="og:type" content="website" />
+    <script>
+      // Runs before the React bundle parses so the first paint already
+      // matches the saved theme — no light-mode flash on reload.
+      if (
+        localStorage.getItem('theme') === 'dark' ||
+        (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)
+      ) {
+        document.documentElement.classList.add('dark');
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
