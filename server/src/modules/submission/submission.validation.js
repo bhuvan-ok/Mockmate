@@ -31,6 +31,7 @@ export const workerResultSchema = z.object({
           expectedOutput: z.string().optional().default(''),
           actualOutput: z.string().optional().default(''),
           passed: z.boolean(),
+          verdictType: z.enum(['AC', 'WA', 'TLE', 'RE', 'MLE', 'CE', 'OLE']).optional().default('WA'),
           runtimeMs: z.number().optional().default(0),
           isHidden: z.boolean().optional().default(false),
         })

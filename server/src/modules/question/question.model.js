@@ -74,6 +74,12 @@ const questionSchema = new mongoose.Schema(
     // host has no equivalent tax and could safely run much tighter.
     timeLimitMs: { type: Number, default: 10000 },
     memoryLimitMb: { type: Number, default: 128 },
+    // 'exact' = trimmed string match (default). 'float' = tokenize both
+    // outputs on whitespace and compare numerically with a small epsilon —
+    // for questions whose expected output is numeric, so "3" and "3.0"
+    // both grade as correct. Falls back to exact match if either side has
+    // a non-numeric token.
+    outputComparator: { type: String, enum: ['exact', 'float'], default: 'exact' },
 
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     isActive: { type: Boolean, default: true },

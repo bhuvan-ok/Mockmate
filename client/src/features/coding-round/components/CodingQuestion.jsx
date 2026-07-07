@@ -3,6 +3,7 @@ import Editor from '@monaco-editor/react';
 import toast from 'react-hot-toast';
 import { FiPlay, FiCheck, FiRotateCcw, FiTerminal } from 'react-icons/fi';
 import { DifficultyBadge } from '../../../components/common/DifficultyBadge.jsx';
+import { VerdictBadge } from '../../../components/common/VerdictBadge.jsx';
 import { HintsList } from '../../../components/common/HintsList.jsx';
 import { createSubmission, getSubmission } from '../submissionApi.js';
 
@@ -153,6 +154,10 @@ export const CodingQuestion = ({ question, attemptId, onSubmitResolved, review }
   };
 
   const isDark = document.documentElement.classList.contains('dark');
+  // A compile failure produces one CE verdict per test case with the same
+  // compiler message repeated — collapse that into a single panel instead
+  // of a redundant per-test-case list.
+  const isCompileError = Boolean(result?.verdicts?.length) && result.verdicts.every((v) => v.verdictType === 'CE');
 
   return (
     <div ref={containerRef} className="flex h-full min-h-0 flex-col gap-0 lg:flex-row">
@@ -305,9 +310,19 @@ export const CodingQuestion = ({ question, attemptId, onSubmitResolved, review }
             <div className="rounded-lg border border-slate-200 p-4 dark:border-slate-800">
               {result.status === 'error' ? (
                 <p className="text-sm text-red-500">{result.errorMessage}</p>
+              ) : isCompileError ? (
+                <>
+                  <VerdictBadge verdictType="CE" />
+                  <pre className="mt-2 whitespace-pre-wrap rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:bg-slate-950 dark:text-slate-300">
+                    {result.verdicts[0].actualOutput}
+                  </pre>
+                </>
               ) : result.mode === 'custom' ? (
                 <>
-                  <p className="text-sm font-medium text-slate-800 dark:text-slate-200">Output</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-slate-800 dark:text-slate-200">Output</p>
+                    <VerdictBadge verdictType={result.verdicts?.[0]?.verdictType} />
+                  </div>
                   <pre className="mt-2 whitespace-pre-wrap rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:bg-slate-950 dark:text-slate-300">
                     {result.verdicts?.[0]?.actualOutput || '(no output)'}
                   </pre>
@@ -327,8 +342,11 @@ export const CodingQuestion = ({ question, attemptId, onSubmitResolved, review }
                             : 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-400'
                         }`}
                       >
+                        <div className="mb-1">
+                          <VerdictBadge verdictType={v.verdictType} />
+                        </div>
                         {v.isHidden ? (
-                          <span>Hidden test case — {v.passed ? 'passed' : 'failed'}</span>
+                          <span>Hidden test case</span>
                         ) : (
                           <>
                             <div>Input: {v.input || '(none)'}</div>

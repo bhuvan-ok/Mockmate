@@ -18,6 +18,7 @@ export const enqueueSubmission = async ({
   testCases,
   timeLimitMs,
   memoryLimitMb,
+  outputComparator,
 }) => {
   await submissionQueue.add('execute', {
     submissionId,
@@ -27,5 +28,6 @@ export const enqueueSubmission = async ({
     testCases,
     timeLimitMs,
     memoryLimitMb,
+    outputComparator,
   });
 };

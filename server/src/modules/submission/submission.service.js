@@ -67,6 +67,7 @@ export const createSubmission = async (
     })),
     timeLimitMs: question.timeLimitMs,
     memoryLimitMb: question.memoryLimitMb,
+    outputComparator: question.outputComparator,
   });
 
   return { submissionId: submission._id, status: submission.status };
@@ -89,12 +90,13 @@ export const getSubmission = async (id, candidateId) => {
     errorMessage: submission.errorMessage,
     verdicts: submission.verdicts.map((v) =>
       v.isHidden
-        ? { passed: v.passed, isHidden: true }
+        ? { passed: v.passed, verdictType: v.verdictType, isHidden: true }
         : {
             input: v.input,
             expectedOutput: v.expectedOutput,
             actualOutput: v.actualOutput,
             passed: v.passed,
+            verdictType: v.verdictType,
             runtimeMs: v.runtimeMs,
             isHidden: false,
           }

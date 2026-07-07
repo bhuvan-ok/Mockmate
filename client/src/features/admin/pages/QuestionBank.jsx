@@ -40,6 +40,7 @@ const emptyCodingForm = {
   testCases: [newTestCase()],
   timeLimitMs: 6000,
   memoryLimitMb: 128,
+  outputComparator: 'exact',
 };
 
 export const QuestionBank = () => {
@@ -111,6 +112,7 @@ export const QuestionBank = () => {
                 .map(({ id: _id, ...tc }) => tc),
               timeLimitMs: Number(form.timeLimitMs),
               memoryLimitMb: Number(form.memoryLimitMb),
+              outputComparator: form.outputComparator,
             };
 
       await createQuestion(payload);
@@ -391,6 +393,20 @@ export const QuestionBank = () => {
                   onChange={(e) => setForm({ ...form, memoryLimitMb: e.target.value })}
                   className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                  Output comparison
+                </label>
+                <select
+                  value={form.outputComparator}
+                  onChange={(e) => setForm({ ...form, outputComparator: e.target.value })}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                >
+                  <option value="exact">Exact match (default)</option>
+                  <option value="float">Numeric tolerance (e.g. "3" == "3.00")</option>
+                </select>
               </div>
             </>
           )}

@@ -43,6 +43,7 @@ const codingSchema = z.object({
     .min(1),
   timeLimitMs: z.number().int().positive().max(15000).optional().default(6000),
   memoryLimitMb: z.number().int().positive().max(512).optional().default(128),
+  outputComparator: z.enum(['exact', 'float']).optional().default('exact'),
 });
 
 export const createQuestionSchema = z.object({

@@ -16,6 +16,42 @@ const KILL_TIMEOUT_MS = 5000;
 // languages get whichever is larger.
 const COMPILE_MEMORY_FLOOR_MB = 512;
 
+// Wall-clock timing a `docker exec` call (the old TLE mechanism) conflates
+// the candidate's actual CPU usage with Docker's own per-invocation IPC
+// overhead — real judges (Codeforces, etc.) measure the sandboxed process's
+// CPU time instead, precisely to stay immune to that kind of noise. We do
+// the same via cgroup CPU accounting (see readCpuUsageUsec below); the
+// wall-clock timeout becomes just a safety net against a genuinely hung
+// process, so it needs headroom above the CPU budget rather than being the
+// budget itself.
+const WALL_CLOCK_SAFETY_PAD_MS = 5000;
+const CPU_STAT_TIMEOUT_MS = 8000;
+
+const FLOAT_EPSILON = 1e-6;
+
+const isNumericToken = (token) => token !== '' && !Number.isNaN(Number(token));
+
+// 'float' mode tokenizes both outputs on whitespace and compares token-by-
+// token within a small epsilon, so "3" / "3.0" / "3.00" all grade as the
+// same answer — a miniature version of the "special judge" pattern real
+// judges use for numeric-output problems. Falls back to an exact string
+// match whenever token counts differ or either side has a non-numeric
+// token, so it can never mask a genuinely wrong answer as correct.
+const outputsMatch = (actual, expected, comparator) => {
+  if (comparator !== 'float') return actual === expected;
+
+  const actualTokens = actual.split(/\s+/).filter(Boolean);
+  const expectedTokens = expected.split(/\s+/).filter(Boolean);
+  if (actualTokens.length !== expectedTokens.length) return actual === expected;
+
+  const allNumeric = actualTokens.every(isNumericToken) && expectedTokens.every(isNumericToken);
+  if (!allNumeric) return actual === expected;
+
+  return actualTokens.every(
+    (token, i) => Math.abs(Number(token) - Number(expectedTokens[i])) <= FLOAT_EPSILON
+  );
+};
+
 // Runs one `docker` CLI invocation and captures stdout/stderr/exit code,
 // optionally feeding stdin and enforcing a timeout that hard-kills the local
 // process. Shared by container start, compile, and per-test-case exec calls.
@@ -102,6 +138,23 @@ const killContainer = async (containerName) => {
   await runDockerCli(['kill', containerName], { timeoutMs: KILL_TIMEOUT_MS }).catch(() => {});
 };
 
+// cgroup v2 exposes each container's own accumulated CPU time at
+// /sys/fs/cgroup/cpu.stat *inside* the container, independent of the host's
+// cgroup driver — reading it immediately before and after a test case's
+// exec and taking the delta gives the CPU microseconds that exec actually
+// consumed. Returns null (rather than throwing) on any host where this
+// path isn't available (e.g. a cgroup v1 host), so callers can fall back to
+// wall-clock timing instead of failing the submission outright.
+const readCpuUsageUsec = async (containerName) => {
+  const result = await runDockerCli(
+    ['exec', containerName, 'sh', '-c', 'cat /sys/fs/cgroup/cpu.stat 2>/dev/null'],
+    { timeoutMs: CPU_STAT_TIMEOUT_MS }
+  );
+  if (result.exitCode !== 0) return null;
+  const match = result.stdout.match(/usage_usec (\d+)/);
+  return match ? Number(match[1]) : null;
+};
+
 export const runSubmission = async ({
   language,
   code,
@@ -109,6 +162,7 @@ export const runSubmission = async ({
   testCases,
   timeLimitMs,
   memoryLimitMb,
+  outputComparator = 'exact',
 }) => {
   const langConfig = languageConfig[language];
   if (!langConfig) throw new Error(`Unsupported language: ${language}`);
@@ -154,6 +208,7 @@ export const runSubmission = async ({
             expectedOutput: tc.expectedOutput,
             actualOutput: message,
             passed: false,
+            verdictType: 'CE',
             runtimeMs: compileResult.runtimeMs,
             isHidden: tc.isHidden,
           })),
@@ -165,28 +220,73 @@ export const runSubmission = async ({
 
     const runCommand = langConfig.runCommand(containerPath);
     const verdicts = [];
+    // Baseline CPU snapshot for the current container, taken right after it
+    // starts (or restarts) so the first test case's delta only reflects its
+    // own exec, not container startup. Rolls forward to each exec's "after"
+    // reading so every test case pays for exactly one extra `docker exec`,
+    // not two.
+    let cpuBaselineUsec = await readCpuUsageUsec(containerName);
 
     for (let i = 0; i < testCases.length; i++) {
       const testCase = testCases[i];
       const result = await runDockerCli(['exec', '-i', containerName, ...runCommand], {
         input: testCase.input,
-        timeoutMs: timeLimitMs,
+        timeoutMs: timeLimitMs + WALL_CLOCK_SAFETY_PAD_MS,
       });
 
-      const actualOutput = result.timedOut
-        ? 'Time limit exceeded'
-        : result.exitCode !== 0
-          ? result.stderr || `Process exited with code ${result.exitCode}`
-          : result.stdout.trim();
+      let verdictType;
+      let actualOutput;
+      let measuredMs = result.runtimeMs;
 
-      const passed = !result.timedOut && result.exitCode === 0 && actualOutput === testCase.expectedOutput.trim();
+      if (result.timedOut) {
+        // The wall-clock safety net fired — the process hung well past any
+        // reasonable budget, so it's TLE regardless of what CPU accounting
+        // would say.
+        verdictType = 'TLE';
+        actualOutput = 'Time limit exceeded';
+      } else {
+        const cpuAfterUsec = await readCpuUsageUsec(containerName);
+        const cpuTimeMs =
+          cpuBaselineUsec !== null && cpuAfterUsec !== null
+            ? Math.max(0, Math.round((cpuAfterUsec - cpuBaselineUsec) / 1000))
+            : null;
+        cpuBaselineUsec = cpuAfterUsec;
+        // Prefer measured CPU time; fall back to wall-clock (the old
+        // behavior) on hosts where cgroup v2 CPU accounting isn't readable.
+        measuredMs = cpuTimeMs !== null ? cpuTimeMs : result.runtimeMs;
+
+        if (measuredMs > timeLimitMs) {
+          verdictType = 'TLE';
+          actualOutput = 'Time limit exceeded';
+        } else if (result.exitCode !== 0) {
+          // The kernel OOM killer SIGKILLs a process that exceeds the
+          // container's memory cap, which docker exec reports as exit code
+          // 137 (128 + SIGKILL) — any other non-zero exit is a genuine crash.
+          verdictType = result.exitCode === 137 ? 'MLE' : 'RE';
+          actualOutput = result.stderr || `Process exited with code ${result.exitCode}`;
+        } else if (result.stdout.length >= MAX_OUTPUT_BYTES) {
+          // runDockerCli caps stdout mid-stream and hard-slices it to
+          // MAX_OUTPUT_BYTES — landing exactly on that cap means output was
+          // truncated, not that the program happened to print that many bytes.
+          verdictType = 'OLE';
+          actualOutput = result.stdout.trim();
+        } else {
+          actualOutput = result.stdout.trim();
+          verdictType = outputsMatch(actualOutput, testCase.expectedOutput.trim(), outputComparator)
+            ? 'AC'
+            : 'WA';
+        }
+      }
+
+      const passed = verdictType === 'AC';
 
       verdicts.push({
         input: testCase.input,
         expectedOutput: testCase.expectedOutput,
         actualOutput,
         passed,
-        runtimeMs: result.runtimeMs,
+        verdictType,
+        runtimeMs: measuredMs,
         isHidden: testCase.isHidden,
       });
 
@@ -203,6 +303,7 @@ export const runSubmission = async ({
             timeoutMs: COMPILE_TIMEOUT_MS,
           });
         }
+        cpuBaselineUsec = await readCpuUsageUsec(containerName);
       }
     }
 

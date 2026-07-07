@@ -6,8 +6,16 @@ import { postResult } from './resultClient.js';
 const worker = new Worker(
   'code-submissions',
   async (job) => {
-    const { submissionId, language, code, driverCode, testCases, timeLimitMs, memoryLimitMb } =
-      job.data;
+    const {
+      submissionId,
+      language,
+      code,
+      driverCode,
+      testCases,
+      timeLimitMs,
+      memoryLimitMb,
+      outputComparator,
+    } = job.data;
 
     try {
       const { verdicts, testCasesPassed, testCasesTotal } = await runSubmission({
@@ -17,6 +25,7 @@ const worker = new Worker(
         testCases,
         timeLimitMs,
         memoryLimitMb,
+        outputComparator,
       });
 
       await postResult(submissionId, {
