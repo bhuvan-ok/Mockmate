@@ -84,7 +84,8 @@ const advanceAfterAnswer = async (attempt, roundIndex) => {
 
 // Lazy expiry check — a safety net alongside the cron sweeper so a round
 // never reads as "in progress" past its deadline even if the sweep hasn't
-// ticked yet. Mutates and does NOT save; caller is responsible for saving.
+// ticked yet. Mutates and does NOT persist; caller is responsible for
+// committing the change atomically (see commitAttempt below).
 const checkAndHandleExpiry = async (attempt) => {
   if (attempt.status === 'completed') return false;
   const round = attempt.rounds[attempt.currentRoundIndex];
@@ -93,6 +94,44 @@ const checkAndHandleExpiry = async (attempt) => {
     return true;
   }
   return false;
+};
+
+// Captures the fields used as an optimistic-concurrency guard before any
+// in-memory mutation begins. `status` and `currentRoundIndex` are exactly
+// the fields every terminal-state transition below changes, so a mismatch
+// at commit time means another path (cron sweep, lazy expiry check, or the
+// worker's result callback) already raced ahead and terminalized this
+// round/attempt first.
+const captureGuard = (attempt) => ({
+  status: attempt.status,
+  currentRoundIndex: attempt.currentRoundIndex,
+});
+
+// Persists whatever mutations were made to `attempt` in memory via a single
+// conditional atomic update, guarded by the state captured before the
+// read-modify-write began. Returns the updated document, or null if another
+// path already changed status/currentRoundIndex first — a lost race, not an
+// error, since the doc's terminal state was already established by
+// whichever path won and the loser's now-stale mutation must not overwrite
+// it. Deliberately excludes `integrityFlags`, which is owned exclusively by
+// logIntegrityEvent's own atomic $inc and must never be clobbered by a
+// stale in-memory copy read before that increment happened.
+const commitAttempt = async (attempt, guard) => {
+  const snapshot = attempt.toObject();
+  return Attempt.findOneAndUpdate(
+    { _id: attempt._id, status: guard.status, currentRoundIndex: guard.currentRoundIndex },
+    {
+      $set: {
+        status: snapshot.status,
+        completedAt: snapshot.completedAt,
+        currentRoundIndex: snapshot.currentRoundIndex,
+        ratingLive: snapshot.ratingLive,
+        overallScore: snapshot.overallScore,
+        rounds: snapshot.rounds,
+      },
+    },
+    { new: true }
+  );
 };
 
 // Builds a read-only review entry for a question the candidate has already
@@ -195,10 +234,15 @@ export const getCurrentState = async (attemptId, candidateId) => {
   const attempt = await Attempt.findOne({ _id: attemptId, candidateId });
   if (!attempt) throw new ApiError(404, 'Attempt not found');
 
+  const guard = captureGuard(attempt);
   const expired = await checkAndHandleExpiry(attempt);
-  if (expired) await attempt.save();
+  if (!expired) return buildCurrentStateResponse(attempt);
 
-  return buildCurrentStateResponse(attempt);
+  const committed = await commitAttempt(attempt, guard);
+  // Lost race: the cron sweep (or a concurrent request for the same
+  // attempt) already expired this round first — its write is authoritative,
+  // so re-read rather than clobber it with our now-stale in-memory copy.
+  return buildCurrentStateResponse(committed || (await Attempt.findById(attemptId)));
 };
 
 export const submitMcqAnswer = async (attemptId, candidateId, selectedOptionIndex) => {
@@ -206,8 +250,12 @@ export const submitMcqAnswer = async (attemptId, candidateId, selectedOptionInde
   if (!attempt) throw new ApiError(404, 'Attempt not found');
   if (attempt.status === 'completed') throw new ApiError(409, 'This attempt has already ended');
 
+  const guard = captureGuard(attempt);
+
   if (await checkAndHandleExpiry(attempt)) {
-    await attempt.save();
+    // Best-effort: whether this commit lands or a racing sweep/lazy-check
+    // already beat it to the same expiry, the round is over either way.
+    await commitAttempt(attempt, guard);
     throw new ApiError(409, 'This round has already ended');
   }
 
@@ -231,9 +279,11 @@ export const submitMcqAnswer = async (attemptId, candidateId, selectedOptionInde
 
   attempt.ratingLive = updateRating(attempt.ratingLive, question.difficulty, actualScore);
   await advanceAfterAnswer(attempt, attempt.currentRoundIndex);
-  await attempt.save();
 
-  return buildCurrentStateResponse(attempt);
+  const committed = await commitAttempt(attempt, guard);
+  if (!committed) throw new ApiError(409, 'This round has already ended');
+
+  return buildCurrentStateResponse(committed);
 };
 
 // Called by the submission module once the sandbox worker posts back a
@@ -254,6 +304,8 @@ export const resolveCodingSubmission = async ({
   );
   if (!item) return; // stale or duplicate callback
 
+  const guard = captureGuard(attempt);
+
   const question = await Question.findById(questionId);
   const actualScore = testCasesTotal > 0 ? testCasesPassed / testCasesTotal : 0;
 
@@ -265,7 +317,12 @@ export const resolveCodingSubmission = async ({
 
   attempt.ratingLive = updateRating(attempt.ratingLive, question.difficulty, actualScore);
   await advanceAfterAnswer(attempt, attempt.currentRoundIndex);
-  await attempt.save();
+
+  // Lost race is a safe no-op here: another path (the cron sweep, or a
+  // duplicate/late worker callback for the same submission) already
+  // terminalized this round/attempt first, so its write already stands —
+  // there's nothing left to apply this verdict to.
+  await commitAttempt(attempt, guard);
 };
 
 // Candidate-initiated early finish — the candidate can walk away from a
@@ -353,11 +410,19 @@ export const sweepExpiredRounds = async () => {
     'rounds.endsAt': { $lte: now },
   });
 
+  let expiredCount = 0;
   for (const attempt of candidates) {
+    const guard = captureGuard(attempt);
     const expired = await checkAndHandleExpiry(attempt);
-    if (expired) await attempt.save();
+    if (!expired) continue;
+
+    // Lost race is a safe no-op: a concurrent lazy expiry check (from a
+    // GET request) or the worker's callback finishing the round's last item
+    // already terminalized this attempt first.
+    const committed = await commitAttempt(attempt, guard);
+    if (committed) expiredCount++;
   }
-  return candidates.length;
+  return expiredCount;
 };
 
 // Candidate-facing history — otherwise a completed attempt's report becomes

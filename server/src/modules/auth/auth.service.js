@@ -59,6 +59,13 @@ export const refreshSession = async (refreshToken) => {
   if (!user || !user.refreshTokenHash) throw new ApiError(401, 'Session no longer valid');
 
   if (user.refreshTokenHash !== hashToken(refreshToken)) {
+    // Reuse of an already-rotated token — someone has a stale token (stolen
+    // or replayed). The current, legitimately-rotated token in the DB is
+    // still valid at this point; leaving it standing would let whoever holds
+    // it keep the session alive. Clear it so both the stale and the
+    // currently-valid refresh tokens are dead, forcing a fresh login.
+    user.refreshTokenHash = null;
+    await user.save();
     throw new ApiError(401, 'Refresh token reuse detected — please log in again');
   }
 

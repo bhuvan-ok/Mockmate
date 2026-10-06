@@ -2,7 +2,7 @@
 
 MockMate is a timed, proctored mock-interview platform for practicing technical interviews:
 adaptive-difficulty MCQ rounds and LeetCode-style coding rounds graded by real code execution in
-isolated Docker sandboxes, with Gemini-powered hints and post-round feedback.
+isolated Docker sandboxes, with hand-authored hints and Gemini-powered post-round feedback.
 
 ## Features
 
@@ -20,9 +20,11 @@ isolated Docker sandboxes, with Gemini-powered hints and post-round feedback.
 - **Server-authoritative timers** — every round's `startedAt`/`durationSec` lives in the database,
   never trusted from the client; a server-side sweep auto-submits any round whose time has
   expired.
-- **AI hints & feedback (Gemini)**, gated server-side — progressive hints unlock after a time
-  threshold, capped at 3 per question and never contain source code or the final answer; a
-  post-round plain-language feedback summary is generated once and cached.
+- **Hints & AI feedback** — hand-authored, LeetCode-style hints ship inline with the
+  candidate-safe question payload and are revealed progressively (one at a time, at the
+  candidate's own pace) entirely client-side, with no AI call or server round-trip involved.
+  Gemini is used only for a post-round plain-language feedback summary, generated once per
+  attempt and cached.
 - **Anti-cheat signals** — tab-switch/blur and paste events are logged per attempt and surfaced on
   the results report and admin attempts list (disclosed to the candidate, never used to
   auto-disqualify).

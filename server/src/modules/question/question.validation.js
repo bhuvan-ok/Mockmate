@@ -60,8 +60,33 @@ export const createQuestionSchema = z.object({
   query: z.object({}).optional(),
 });
 
+// Partial derivations of the create schemas — `type` stays required (it
+// selects which variant's rules apply and a coding question can never
+// become an MCQ mid-edit or vice versa) but every other field is optional
+// so a PUT can update just a subset. Bounds-checks correctOptionIndex
+// against options whenever both are present in the same update payload,
+// mirroring createQuestionSchema's superRefine; an update that changes only
+// correctOptionIndex without resending options can't be bounds-checked at
+// the schema layer (the existing option count lives in the DB, not the
+// request), so that combination is intentionally left unchecked here.
+const mcqUpdateSchema = mcqSchema.partial().extend({ type: z.literal('mcq') });
+const codingUpdateSchema = codingSchema.partial().extend({ type: z.literal('coding') });
+
 export const updateQuestionSchema = z.object({
-  body: z.object({}).passthrough(),
+  body: z.discriminatedUnion('type', [mcqUpdateSchema, codingUpdateSchema]).superRefine((data, ctx) => {
+    if (
+      data.type === 'mcq' &&
+      data.correctOptionIndex !== undefined &&
+      data.options !== undefined &&
+      data.correctOptionIndex >= data.options.length
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'correctOptionIndex must reference a valid option',
+        path: ['correctOptionIndex'],
+      });
+    }
+  }),
   params: z.object({ id: z.string().length(24) }),
   query: z.object({}).optional(),
 });
