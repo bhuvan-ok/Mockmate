@@ -61,6 +61,7 @@ const runDockerCli = (args, { input, timeoutMs } = {}) => {
     let stdout = '';
     let stderr = '';
     let timedOut = false;
+    let outputLimitExceeded = false;
     const startedAt = Date.now();
 
     const timeoutHandle = timeoutMs
@@ -70,11 +71,24 @@ const runDockerCli = (args, { input, timeoutMs } = {}) => {
         }, timeoutMs)
       : null;
 
+    // A print-looping submission would otherwise keep running for the full
+    // timeout window just to have its output truncated anyway — kill it the
+    // instant either stream crosses the cap so it fails fast instead.
+    const enforceOutputCap = () => {
+      if (outputLimitExceeded) return;
+      if (stdout.length >= MAX_OUTPUT_BYTES || stderr.length >= MAX_OUTPUT_BYTES) {
+        outputLimitExceeded = true;
+        proc.kill('SIGKILL');
+      }
+    };
+
     proc.stdout.on('data', (chunk) => {
       if (stdout.length < MAX_OUTPUT_BYTES) stdout += chunk.toString();
+      enforceOutputCap();
     });
     proc.stderr.on('data', (chunk) => {
       if (stderr.length < MAX_OUTPUT_BYTES) stderr += chunk.toString();
+      enforceOutputCap();
     });
 
     if (input !== undefined) {
@@ -88,6 +102,7 @@ const runDockerCli = (args, { input, timeoutMs } = {}) => {
         stdout: stdout.slice(0, MAX_OUTPUT_BYTES),
         stderr: stderr.slice(0, MAX_OUTPUT_BYTES),
         timedOut,
+        outputLimitExceeded,
         exitCode,
         runtimeMs: Date.now() - startedAt,
       });
@@ -95,7 +110,14 @@ const runDockerCli = (args, { input, timeoutMs } = {}) => {
 
     proc.on('error', (err) => {
       if (timeoutHandle) clearTimeout(timeoutHandle);
-      resolve({ stdout: '', stderr: err.message, timedOut: false, exitCode: -1, runtimeMs: Date.now() - startedAt });
+      resolve({
+        stdout: '',
+        stderr: err.message,
+        timedOut: false,
+        outputLimitExceeded: false,
+        exitCode: -1,
+        runtimeMs: Date.now() - startedAt,
+      });
     });
   });
 };
@@ -117,6 +139,13 @@ const startContainer = async ({ image, hostDir, memoryLimitMb }) => {
       '--cpus', '1',
       '--pids-limit', '128',
       '--read-only',
+      // The whole point of this platform is safely running arbitrary
+      // candidate code — without these, the container still carries
+      // Docker's full default Linux capability set and can have its
+      // suid/setgid binaries escalate privileges. Ordinary JS/C++ programs
+      // need neither, so dropping them is invisible to normal submissions.
+      '--cap-drop', 'ALL',
+      '--security-opt', 'no-new-privileges',
       // `exec` must be explicit — Docker's tmpfs mounts default to noexec on
       // some configurations, which silently makes a freshly compiled C++
       // binary unrunnable (exit code 126) even though the file exists.
@@ -238,7 +267,14 @@ export const runSubmission = async ({
       let actualOutput;
       let measuredMs = result.runtimeMs;
 
-      if (result.timedOut) {
+      if (result.outputLimitExceeded) {
+        // Output was actively capped and the process killed the instant it
+        // crossed MAX_OUTPUT_BYTES — a print-looping submission fails fast
+        // here instead of burning the full time limit only to be truncated
+        // anyway.
+        verdictType = 'OLE';
+        actualOutput = result.stdout.trim();
+      } else if (result.timedOut) {
         // The wall-clock safety net fired — the process hung well past any
         // reasonable budget, so it's TLE regardless of what CPU accounting
         // would say.
@@ -290,12 +326,12 @@ export const runSubmission = async ({
         isHidden: testCase.isHidden,
       });
 
-      // A timed-out `docker exec` only kills the local CLI client — the
-      // process it started keeps running inside the container. Retire the
-      // container and start a clean one (recompiling if needed) so a
-      // runaway process from one test case can never eat into the next
-      // test case's timing or resources.
-      if (result.timedOut && i < testCases.length - 1) {
+      // A timed-out (or output-capped) `docker exec` only kills the local
+      // CLI client — the process it started keeps running inside the
+      // container. Retire the container and start a clean one (recompiling
+      // if needed) so a runaway process from one test case can never eat
+      // into the next test case's timing or resources.
+      if ((result.timedOut || result.outputLimitExceeded) && i < testCases.length - 1) {
         await killContainer(containerName);
         containerName = await startContainer({ image: langConfig.image, hostDir, memoryLimitMb: containerMemoryMb });
         if (langConfig.compileCommand) {

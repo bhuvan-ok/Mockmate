@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 export const config = {
+  isDev: process.env.NODE_ENV !== 'production',
   redisUrl: process.env.REDIS_URL,
   serverUrl: process.env.SERVER_URL,
   workerCallbackSecret: process.env.WORKER_CALLBACK_SECRET,

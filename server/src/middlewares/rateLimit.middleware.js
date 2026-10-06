@@ -24,3 +24,14 @@ export const aiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+// Every submission spins a real Docker container against a worker with
+// concurrency: 2 — without a tighter cap here, one candidate hammering
+// "Run"/"Submit" could queue up to the generalLimiter's full 100/15min and
+// starve every other candidate's containers for the whole window.
+export const submissionLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 25 * scale,
+  standardHeaders: true,
+  legacyHeaders: false,
+});

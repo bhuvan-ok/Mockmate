@@ -4,6 +4,18 @@ import { User } from '../modules/auth/user.model.js';
 import { Question } from '../modules/question/question.model.js';
 import { InterviewSet } from '../modules/interview-set/interview-set.model.js';
 import mongoose from 'mongoose';
+import {
+  genLongestSubstringCase,
+  genProductExceptSelfCase,
+  genLongestPalindromeCase,
+  genMergeIntervalsCase,
+  genKthLargestCase,
+  genMaxSubArrayCase,
+  genSearchRotatedCase,
+  wordBreakStressCase,
+  genMaxAreaCase,
+  coinChangeStressCase,
+} from './testCaseGenerators.js';
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@mockmate.dev';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'ChangeMe123!';
@@ -448,6 +460,7 @@ const codingQuestions = [
       { input: 'abcabcbb', expectedOutput: '3', isHidden: false },
       { input: 'bbbbb', expectedOutput: '1', isHidden: false },
       { input: 'pwwkew', expectedOutput: '3', isHidden: true },
+      genLongestSubstringCase(),
     ],
     timeLimitMs: 10000,
     memoryLimitMb: 128,
@@ -481,6 +494,7 @@ const codingQuestions = [
       { input: '1 2 3 4', expectedOutput: '24 12 8 6', isHidden: false },
       { input: '2 3', expectedOutput: '3 2', isHidden: false },
       { input: '-1 1 0 -3 3', expectedOutput: '0 0 9 0 0', isHidden: true },
+      genProductExceptSelfCase(),
     ],
     timeLimitMs: 10000,
     memoryLimitMb: 128,
@@ -514,6 +528,7 @@ const codingQuestions = [
       { input: 'babad', expectedOutput: 'bab', isHidden: false },
       { input: 'cbbd', expectedOutput: 'bb', isHidden: false },
       { input: 'a', expectedOutput: 'a', isHidden: true },
+      genLongestPalindromeCase(),
     ],
     timeLimitMs: 10000,
     memoryLimitMb: 128,
@@ -547,6 +562,7 @@ const codingQuestions = [
       { input: '1 3 2 6 8 10 15 18', expectedOutput: '1 6 8 10 15 18', isHidden: false },
       { input: '1 4 4 5', expectedOutput: '1 5', isHidden: false },
       { input: '1 4 0 4', expectedOutput: '0 4', isHidden: true },
+      genMergeIntervalsCase(),
     ],
     timeLimitMs: 10000,
     memoryLimitMb: 128,
@@ -580,6 +596,7 @@ const codingQuestions = [
       { input: '3 2 1 5 6 4\n2', expectedOutput: '5', isHidden: false },
       { input: '1 2\n1', expectedOutput: '2', isHidden: false },
       { input: '3 2 3 1 2 4 5 5 6\n4', expectedOutput: '4', isHidden: true },
+      genKthLargestCase(),
     ],
     timeLimitMs: 10000,
     memoryLimitMb: 128,
@@ -612,6 +629,7 @@ const codingQuestions = [
       { input: '-2 1 -3 4 -1 2 1 -5 4', expectedOutput: '6', isHidden: false },
       { input: '1', expectedOutput: '1', isHidden: false },
       { input: '5 4 -1 7 8', expectedOutput: '23', isHidden: true },
+      genMaxSubArrayCase(),
     ],
     timeLimitMs: 10000,
     memoryLimitMb: 128,
@@ -645,6 +663,7 @@ const codingQuestions = [
       { input: '4 5 6 7 0 1 2\n0', expectedOutput: '4', isHidden: false },
       { input: '4 5 6 7 0 1 2\n3', expectedOutput: '-1', isHidden: false },
       { input: '1\n0', expectedOutput: '-1', isHidden: true },
+      genSearchRotatedCase(),
     ],
     timeLimitMs: 10000,
     memoryLimitMb: 128,
@@ -679,6 +698,7 @@ const codingQuestions = [
       { input: 'leetcode\nleet code', expectedOutput: 'true', isHidden: false },
       { input: 'applepenapple\napple pen', expectedOutput: 'true', isHidden: false },
       { input: 'catsandog\ncats dog sand and cat', expectedOutput: 'false', isHidden: true },
+      wordBreakStressCase,
     ],
     timeLimitMs: 10000,
     memoryLimitMb: 128,
@@ -712,6 +732,7 @@ const codingQuestions = [
       { input: '1 8 6 2 5 4 8 3 7', expectedOutput: '49', isHidden: false },
       { input: '1 1', expectedOutput: '1', isHidden: false },
       { input: '4 3 2 1 4', expectedOutput: '16', isHidden: true },
+      genMaxAreaCase(),
     ],
     timeLimitMs: 10000,
     memoryLimitMb: 128,
@@ -745,6 +766,7 @@ const codingQuestions = [
       { input: '1 2 5\n11', expectedOutput: '3', isHidden: false },
       { input: '2\n3', expectedOutput: '-1', isHidden: false },
       { input: '1\n0', expectedOutput: '0', isHidden: true },
+      coinChangeStressCase,
     ],
     timeLimitMs: 10000,
     memoryLimitMb: 128,

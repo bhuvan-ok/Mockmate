@@ -2,6 +2,7 @@ import { Worker } from 'bullmq';
 import { redisConnection } from './connection.js';
 import { runSubmission } from './runner.js';
 import { postResult } from './resultClient.js';
+import { config } from './config.js';
 
 const worker = new Worker(
   'code-submissions',
@@ -41,7 +42,7 @@ const worker = new Worker(
         status: 'error',
         verdicts: [],
         testCasesPassed: 0,
-        testCasesTotal: testCases.length,
+        testCasesTotal: testCases?.length ?? 0,
         errorMessage: err.message,
       }).catch((postErr) => console.error('Failed to report error to server:', postErr));
     }
@@ -52,7 +53,9 @@ const worker = new Worker(
   }
 );
 
-worker.on('completed', (job) => console.log(`Job ${job.id} completed`));
+if (config.isDev) {
+  worker.on('completed', (job) => console.log(`Job ${job.id} completed`));
+}
 worker.on('failed', (job, err) => console.error(`Job ${job?.id} failed:`, err));
 worker.on('error', (err) => console.error('Worker/Redis connection error:', err));
 
